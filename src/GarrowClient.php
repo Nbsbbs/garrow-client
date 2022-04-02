@@ -21,6 +21,19 @@ class GarrowClient
         '54.208.102.37',
         '107.21.1.8',
     ];
+    public const BOT_GOOGLE = 1;
+    public const BOT_DUCK_DUCK_GO = 2;
+    public const BOT_YANDEX = 3;
+    public const BOT_BAIDU = 4;
+    public const BOT_SOGOU = 5;
+    public const BOT_SOSOSPIDER = 6;
+    public const BOT_BING = 7;
+    public const BOT_SEZNAM = 8;
+    public const BOT_EMULATION = 100;
+    public const BOT_DEBUG = 101;
+    public const BOTS_REPORT = [
+        self::BOT_GOOGLE,
+    ];
 
     private string $dataDir = "/tmp";
 
@@ -38,6 +51,8 @@ class GarrowClient
 
     public const CACHE_LIFETIME_SEC = 600;
 
+    protected int $bot = 0;
+
     /**
      * @param string $dataDir
      * @throws Exception
@@ -51,6 +66,16 @@ class GarrowClient
             throw new \Exception ("Path " . $this->dataDir . ", which is set as data dir, is not writeable");
         }
         $this->domain = str_replace("www.", "", strtolower($_SERVER['HTTP_HOST']));
+    }
+
+    /**
+     * @param int $bot
+     */
+    protected function setBot(int $bot = null)
+    {
+        if ($bot) {
+            $this->bot = $bot;
+        }
     }
 
     public function setDoAlwaysShowSomething(): void
@@ -89,54 +114,78 @@ class GarrowClient
      */
     public function setEmulation(bool $mode)
     {
+        $this->setBot(self::BOT_EMULATION);
         $this->emulation = $mode;
     }
 
     /**
      * @return bool
      */
-    public function detectBot(): bool
+    protected function isGoodBot(): bool
+    {
+        return in_array($this->bot, self::BOTS_REPORT);
+    }
+
+    /**
+     * @return bool
+     */
+    public function detectBot()
     {
         if ($this->emulation) {
             return true;
         }
 
-        $userAgent = $_SERVER['HTTP_USER_AGENT'];
-        $ip = $_SERVER['REMOTE_ADDR'];
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
-        if ($this->isDebug($userAgent)) {
+        if ($this->isDebug((string) $userAgent)) {
+            $this->setBot(self::BOT_DEBUG);
             return true;
         }
 
+        if ($ip = filter_var($_SERVER['REMOTE_ADDR'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            // bots use ipv4
+            // continue checking
+        } else {
+            return false;
+        }
+
         if ($this->isDuckDuckGoBot($userAgent, $ip)) {
+            $this->setBot(self::BOT_DUCK_DUCK_GO);
             return true;
         }
 
         if ($this->isYandexBot($userAgent, $ip)) {
+            $this->setBot(self::BOT_YANDEX);
             return true;
         }
 
         if ($this->isGoogleBot($userAgent, $ip)) {
+            $this->setBot(self::BOT_GOOGLE);
             return true;
         }
 
         if ($this->isBaiduBot($userAgent, $ip)) {
+            $this->setBot(self::BOT_BAIDU);
             return true;
         }
 
         if ($this->isSogouBot($userAgent, $ip)) {
+            $this->setBot(self::BOT_SOGOU);
             return true;
         }
 
         if ($this->isSosospiderBot($userAgent, $ip)) {
+            $this->setBot(self::BOT_SOSOSPIDER);
             return true;
         }
 
         if ($this->isBingBot($userAgent, $ip)) {
+            $this->setBot(self::BOT_BING);
             return true;
         }
 
         if ($this->isSeznamBot($userAgent, $ip)) {
+            $this->setBot(self::BOT_SEZNAM);
             return true;
         }
 
@@ -393,8 +442,16 @@ class GarrowClient
      * @return bool
      * @throws \ErrorException
      */
-    protected function reportSetLinks(array $links): bool
+    protected function reportSetLinks($links)
     {
+        if ($this->emulation) {
+            return false;
+        }
+
+        if (!$this->isGoodBot()) {
+            // do not report link if bot is not good enough
+            return false;
+        }
 
         $linksSet = array_filter($links, function ($link) {
             if ($link['type'] == self::TYPE_ACTUAL) {
@@ -417,6 +474,7 @@ class GarrowClient
             'domain' => $this->domain,
             'setUrl' => $this->currentUrl(),
             'linkIds' => $linksIds,
+            'botType' => $this->bot,
             'userAgent' => $_SERVER['HTTP_USER_AGENT'],
         ];
 
@@ -549,17 +607,28 @@ class GarrowClient
     }
 
     /**
-     * @param int $link_id
-     * @param string $set_url
+     * @param $link_id
+     * @param $set_url
      * @return bool
      * @throws \ErrorException
      */
-    public function reportLinkSet(int $link_id, string  $set_url): bool
+    public function reportLinkSet($link_id, $set_url)
     {
+        if (!$this->isGoodBot()) {
+            // do not report link if bot is not good enough
+            return false;
+        }
+
         $ch = curl_init(self::SERVER_URL . "?act=reportset");
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
         curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, ['domain' => $this->domain, "link_id" => $link_id, "set_url" => $set_url, 'userAgent' => $_SERVER["HTTP_USER_AGENT"]]);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, [
+            'domain' => $this->domain,
+            "link_id" => $link_id,
+            'bot_type' => $this->bot,
+            "set_url" => $set_url,
+            'userAgent' => $_SERVER['HTTP_USER_AGENT'],
+        ]);
         $data = curl_exec($ch);
 
         curl_close($ch);
@@ -651,16 +720,25 @@ class GarrowClient
     /**
      * @param array $data
      */
-    public function saveUsedLinks(array $data): void
+    public function saveUsedLinks($data)
     {
+        if ($this->emulation) {
+            return;
+        }
+
+        if (!$this->isGoodBot()) {
+            // do not save link if bot is not good enough
+            return;
+        }
+
         $result = [];
         foreach ($data as $link_id => $value) {
-            if ($value['timestamp'] >= time() - 86400) {
+            if ($value['timestamp'] >= time() - 600) {
                 $result[$value['id']] = $value;
             }
         }
 
-        file_put_contents($this->getUsedLinksFilename(), json_encode($data));
+        file_put_contents($this->getUsedLinksFilename(), json_encode($result));
         chmod($this->getUsedLinksFilename(), 0666);
     }
 
