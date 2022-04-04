@@ -34,23 +34,46 @@ class GarrowClient
     public const BOTS_REPORT = [
         self::BOT_GOOGLE,
     ];
-
-    private string $dataDir = "/tmp";
-
-    private string $domain = "";
-
-    private bool $emulation = false;
-
-    private array $allLinks = [];
-
-    private array $usedLinks = [];
-
-    private array $unusedLinks = [];
-
-    private bool $doAlwaysShowSomething = false;
-
     public const CACHE_LIFETIME_SEC = 600;
 
+    /**
+     * @var string
+     */
+    private string $dataDir = "/tmp";
+
+    /**
+     * @var string|array|string[]
+     */
+    private string $domain = "";
+
+    /**
+     * @var bool
+     */
+    private bool $emulation = false;
+
+    /**
+     * @var array
+     */
+    private array $allLinks = [];
+
+    /**
+     * @var array
+     */
+    private array $usedLinks = [];
+
+    /**
+     * @var array
+     */
+    private array $unusedLinks = [];
+
+    /**
+     * @var bool
+     */
+    private bool $doAlwaysShowSomething = false;
+
+    /**
+     * @var int
+     */
     protected int $bot = 0;
 
     /**
